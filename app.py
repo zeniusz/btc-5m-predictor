@@ -1,5 +1,6 @@
 """BTC 5m Predictor: live dashboard.  Run with:  streamlit run app.py"""
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 
 import plotly.graph_objects as go
 import streamlit as st
@@ -47,12 +48,12 @@ st.markdown(
 )
 
 if "history" not in st.session_state:
-    st.session_state.history = []      # resolved predictions
-    st.session_state.pending = None    # prediction for the running window
+    st.session_state.history = []  # resolved predictions
+    st.session_state.pending = None  # prediction for the running window
 
 
 def update_scoreboard(snap):
-    """Lock in the call for each window, then grade it once the window closes."""
+    """Lock one call per window, then grade it after the window closes."""
     pending = st.session_state.pending
     if pending and snap.interval_start > pending["start"]:
         went_up = snap.open_price >= pending["open"]
@@ -62,22 +63,32 @@ def update_scoreboard(snap):
         st.session_state.history = st.session_state.history[:50]
         pending = None
     if pending is None or snap.interval_start > pending["start"]:
-        pending = {"start": snap.interval_start, "open": snap.open_price}
-    pending["direction"] = snap.direction  # keeps updating; the last call before close counts
-    pending["confidence"] = snap.confidence
+        pending = {
+            "start": snap.interval_start,
+            "open": snap.open_price,
+            "direction": snap.direction,
+            "confidence": snap.confidence,
+        }
     st.session_state.pending = pending
 
 
 def gauge(score):
-    fig = go.Figure(go.Indicator(
-        mode="gauge", value=score * 100,
-        gauge={
-            "axis": {"range": [-100, 100], "tickcolor": "#555", "tickfont": {"color": "#777"}},
-            "bar": {"color": "#22e39b" if score >= 0 else "#ff5470", "thickness": 0.35},
-            "bgcolor": "#0e0e1c", "borderwidth": 0,
-            "steps": [{"range": [-100, 0], "color": "#2a1320"}, {"range": [0, 100], "color": "#10281f"}],
-        },
-    ))
+    fig = go.Figure(
+        go.Indicator(
+            mode="gauge",
+            value=score * 100,
+            gauge={
+                "axis": {"range": [-100, 100], "tickcolor": "#555", "tickfont": {"color": "#777"}},
+                "bar": {"color": "#22e39b" if score >= 0 else "#ff5470", "thickness": 0.35},
+                "bgcolor": "#0e0e1c",
+                "borderwidth": 0,
+                "steps": [
+                    {"range": [-100, 0], "color": "#2a1320"},
+                    {"range": [0, 100], "color": "#10281f"},
+                ],
+            },
+        )
+    )
     fig.update_layout(height=180, margin=dict(l=20, r=20, t=10, b=0), paper_bgcolor="rgba(0,0,0,0)")
     return fig
 
@@ -86,16 +97,34 @@ def sparkline(snap):
     up = snap.closes[-1] >= snap.open_price
     color = "#22e39b" if up else "#ff5470"
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=snap.times, y=snap.closes, mode="lines", line=dict(color=color, width=2.5),
-                             fill="tozeroy", fillcolor="rgba(34,227,155,.07)" if up else "rgba(255,84,112,.07)"))
-    fig.add_hline(y=snap.open_price, line_dash="dot", line_color="#8a8fb0",
-                  annotation_text="window open", annotation_font_color="#8a8fb0")
+    fig.add_trace(
+        go.Scatter(
+            x=snap.times,
+            y=snap.closes,
+            mode="lines",
+            line=dict(color=color, width=2.5),
+            fill="tozeroy",
+            fillcolor="rgba(34,227,155,.07)" if up else "rgba(255,84,112,.07)",
+        )
+    )
+    fig.add_hline(
+        y=snap.open_price,
+        line_dash="dot",
+        line_color="#8a8fb0",
+        annotation_text="window open",
+        annotation_font_color="#8a8fb0",
+    )
     lo, hi = min(snap.closes), max(snap.closes)
     pad = (hi - lo) * 0.15 or 1
-    fig.update_layout(height=230, margin=dict(l=0, r=0, t=10, b=0), paper_bgcolor="rgba(0,0,0,0)",
-                      plot_bgcolor="rgba(0,0,0,0)", showlegend=False,
-                      xaxis=dict(showgrid=False, color="#666"),
-                      yaxis=dict(range=[lo - pad, hi + pad], gridcolor="#1e1e38", color="#666"))
+    fig.update_layout(
+        height=230,
+        margin=dict(l=0, r=0, t=10, b=0),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        showlegend=False,
+        xaxis=dict(showgrid=False, color="#666"),
+        yaxis=dict(range=[lo - pad, hi + pad], gridcolor="#1e1e38", color="#666"),
+    )
     return fig
 
 
@@ -108,34 +137,52 @@ def live_panel():
         return
     update_scoreboard(snap)
 
-    secs = max(0, int((snap.interval_end - datetime.now(timezone.utc)).total_seconds()))
+    secs = max(0, int((snap.interval_end - datetime.now(UTC)).total_seconds()))
     cls = "up" if snap.direction == "UP" else "down"
     arrow = "🚀" if snap.direction == "UP" else "📉"
 
     c1, c2, c3 = st.columns([1.1, 1.3, 1])
     with c1:
-        st.markdown(f"""<div class="card"><div class="label"><span class="live"></span>BTC / USDT · Binance</div>
+        st.markdown(
+            f"""<div class="card"><div class="label"><span class="live"></span>BTC / USDT · Binance</div>
         <div class="big">${snap.price:,.2f}</div>
         <div class="sub">{snap.momentum_pct:+.3f}% since window open · ${snap.open_price:,.2f}</div>
         <br><div class="label">Window closes in</div>
-        <div class="big" style="font-size:2rem">{secs // 60}:{secs % 60:02d}</div></div>""", unsafe_allow_html=True)
+        <div class="big" style="font-size:2rem">{secs // 60}:{secs % 60:02d}</div></div>""",
+            unsafe_allow_html=True,
+        )
     with c2:
-        st.markdown(f"""<div class="card"><div class="label">Prediction · next {INTERVAL_MINUTES} min</div>
+        st.markdown(
+            f"""<div class="card"><div class="label">Prediction · next {INTERVAL_MINUTES} min</div>
         <div class="big {cls}">{arrow} {snap.direction}</div>
         <div class="sub">Signal strength {snap.confidence}/99 (not a win probability)</div></div>""",
-                    unsafe_allow_html=True)
-        st.plotly_chart(gauge(snap.score), width="stretch", config={"displayModeBar": False})
+            unsafe_allow_html=True,
+        )
+        st.plotly_chart(
+            gauge(snap.score),
+            width="stretch",
+            config={"displayModeBar": False},
+            alt="Signal gauge from bearish to bullish",
+        )
     with c3:
         h = st.session_state.history
         hits = sum(x["hit"] for x in h)
         rate = f"{hits / len(h) * 100:.0f}%" if h else "—"
-        st.markdown(f"""<div class="card"><div class="label">Live track record</div>
+        st.markdown(
+            f"""<div class="card"><div class="label">Live track record</div>
         <div class="big">{rate}</div><div class="sub">{hits} / {len(h)} windows called correctly this session</div>
         <br><div class="label">Recent calls</div>
-        <div style="font-size:1.3rem;letter-spacing:.2em">{''.join('🟢' if x['hit'] else '🔴' for x in h[:12]) or '<span class="sub">collecting…</span>'}</div>
-        </div>""", unsafe_allow_html=True)
+        <div style="font-size:1.3rem;letter-spacing:.2em">{"".join("🟢" if x["hit"] else "🔴" for x in h[:12]) or '<span class="sub">collecting…</span>'}</div>
+        </div>""",
+            unsafe_allow_html=True,
+        )
 
-    st.plotly_chart(sparkline(snap), width="stretch", config={"displayModeBar": False})
+    st.plotly_chart(
+        sparkline(snap),
+        width="stretch",
+        config={"displayModeBar": False},
+        alt="Recent one-minute BTC price and the current five-minute window open",
+    )
 
     m = st.columns(5)
     m[0].metric("Order book imbalance", f"{snap.imbalance:+.2f}")
