@@ -1,4 +1,4 @@
 ccxt>=4.5,<5
 pandas>=2.2,<4
-plotly>=6,<8
+plotly>=7.1.0,<8
 streamlit>=1.57,<2
